@@ -326,13 +326,14 @@ class UnifiedAnyRouterChecker {
 		// 为目标平台创建独立的 GitHub 签到实例
 		const githubSignInModule = new AnyRouterGitHubSignIn(platform.url);
 
-		// 调用 GitHub 登录模块，传递 TOTP 2FA 密钥
+		// 调用 GitHub 登录模块，传递 TOTP 2FA 密钥和账号信息
 		const loginResult = await githubSignInModule.loginAndGetSession(
 			accountInfo._id,
 			accountInfo.username,
 			accountInfo.password,
 			accountInfo.notice_email,
-			accountInfo.twofa_secret
+			accountInfo.twofa_secret,
+			accountInfo
 		);
 
 		if (loginResult && loginResult.userInfo) {
@@ -350,6 +351,10 @@ class UnifiedAnyRouterChecker {
 			updateData.used = Math.round((loginResult.userInfo.used_quota || 0) / 500000);
 			if (loginResult.userInfo.aff_code) {
 				updateData.aff_code = loginResult.userInfo.aff_code;
+			}
+			// 添加令牌信息
+			if (loginResult.userInfo.tokens) {
+				updateData.tokens = loginResult.userInfo.tokens;
 			}
 
 			updateData.checkin_date = Date.now();
@@ -650,9 +655,9 @@ if (isMainModule) {
 			const accounts = apiResult.data;
 			console.log(`[成功] 获取到 ${accounts.length} 个账号`);
 
-			// accounts.forEach(item=>{
-			// 	item.session = ""
-			// })
+			accounts.forEach(item=>{
+				item.session = ""
+			})
 
 			if (accounts.length === 0) {
 				console.log('[完成] 没有需要签到的账号，程序退出');

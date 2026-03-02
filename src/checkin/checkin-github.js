@@ -55,15 +55,195 @@ class AnyRouterGitHubSignIn {
 	}
 
 	/**
+	 * 获取令牌列表
+	 * @param {Object} page - Playwright page 对象
+	 * @param {string} apiUser - API User ID
+	 * @returns {Array} - 令牌列表
+	 */
+	async getTokens(page, apiUser) {
+		try {
+			console.log('[令牌] 获取令牌列表...');
+			const result = await page.evaluate(
+				async ({ baseUrl, apiUser }) => {
+					try {
+						const response = await fetch(`${baseUrl}/api/token/?p=0&size=100`, {
+							method: 'GET',
+							headers: {
+								Accept: 'application/json, text/plain, */*',
+								'new-api-user': apiUser,
+							},
+							credentials: 'include',
+						});
+
+						const data = await response.json();
+						return {
+							status: response.status,
+							data: data,
+						};
+					} catch (error) {
+						return {
+							error: error.message,
+						};
+					}
+				},
+				{ baseUrl: this.baseUrl, apiUser }
+			);
+
+			if (result.error) {
+				console.log(`[失败] 获取令牌列表失败: ${result.error}`);
+				return [];
+			}
+
+			if (result.status === 200 && result.data.success) {
+				const tokens = result.data.data || [];
+				console.log(`[信息] 获取到 ${tokens.length} 个令牌`);
+				return tokens;
+			}
+
+			return [];
+		} catch (error) {
+			console.log(`[失败] 获取令牌列表时发生错误: ${error.message}`);
+			return [];
+		}
+	}
+
+	/**
+	 * 删除令牌
+	 * @param {Object} page - Playwright page 对象
+	 * @param {string} apiUser - API User ID
+	 * @param {number} tokenId - 令牌ID
+	 * @returns {boolean} - 是否删除成功
+	 */
+	async deleteToken(page, apiUser, tokenId) {
+		try {
+			console.log(`[令牌] 删除令牌 ID: ${tokenId}...`);
+			const result = await page.evaluate(
+				async ({ baseUrl, apiUser, tokenId }) => {
+					try {
+						const response = await fetch(`${baseUrl}/api/token/${tokenId}`, {
+							method: 'DELETE',
+							headers: {
+								Accept: 'application/json, text/plain, */*',
+								'new-api-user': apiUser,
+							},
+							credentials: 'include',
+						});
+
+						const data = await response.json();
+						return {
+							status: response.status,
+							data: data,
+						};
+					} catch (error) {
+						return {
+							error: error.message,
+						};
+					}
+				},
+				{ baseUrl: this.baseUrl, apiUser, tokenId }
+			);
+
+			if (result.error) {
+				console.log(`[失败] 删除令牌失败: ${result.error}`);
+				return false;
+			}
+
+			if (result.status === 200 && result.data.success) {
+				console.log(`[成功] 令牌 ${tokenId} 删除成功`);
+				return true;
+			}
+
+			console.log(`[失败] 删除令牌失败: ${result.data.message || '未知错误'}`);
+			return false;
+		} catch (error) {
+			console.log(`[失败] 删除令牌时发生错误: ${error.message}`);
+			return false;
+		}
+	}
+
+	/**
+	 * 创建新令牌
+	 * @param {Object} page - Playwright page 对象
+	 * @param {string} apiUser - API User ID
+	 * @param {Object} tokenConfig - 令牌配置（可选）
+	 * @returns {boolean} - 是否创建成功
+	 */
+	async createToken(page, apiUser, tokenConfig = {}) {
+		try {
+			console.log('[令牌] 创建新令牌...');
+
+			const requestBody = {
+				name: tokenConfig.name || 'dw',
+				expired_time: -1,
+				model_limits_enabled: false,
+				model_limits: '',
+				allow_ips: '',
+				group: 'default',
+			};
+
+			if (tokenConfig.unlimited_quota) {
+				requestBody.unlimited_quota = true;
+			} else {
+				requestBody.remain_quota = tokenConfig.remain_quota || 500000;
+			}
+
+			const result = await page.evaluate(
+				async ({ baseUrl, apiUser, requestBody }) => {
+					try {
+						const response = await fetch(`${baseUrl}/api/token/`, {
+							method: 'POST',
+							headers: {
+								Accept: 'application/json, text/plain, */*',
+								'Content-Type': 'application/json',
+								'new-api-user': apiUser,
+							},
+							body: JSON.stringify(requestBody),
+							credentials: 'include',
+						});
+
+						const data = await response.json();
+						return {
+							status: response.status,
+							data: data,
+						};
+					} catch (error) {
+						return {
+							error: error.message,
+						};
+					}
+				},
+				{ baseUrl: this.baseUrl, apiUser, requestBody }
+			);
+
+			if (result.error) {
+				console.log(`[失败] 创建令牌失败: ${result.error}`);
+				return false;
+			}
+
+			if (result.status === 200 && result.data.success) {
+				console.log('[成功] 令牌创建成功');
+				return true;
+			}
+
+			console.log(`[失败] 创建令牌失败: ${result.data.message || '未知错误'}`);
+			return false;
+		} catch (error) {
+			console.log(`[失败] 创建令牌时发生错误: ${error.message}`);
+			return false;
+		}
+	}
+
+	/**
 	 * 通过 GitHub 第三方登录获取 session 和 api_user
 	 * @param {string} accountId - AnyRouter 账号记录ID (来自环境变量 ANYROUTER_ACCOUNTS 的 _id)
 	 * @param {string} username - GitHub 用户名
 	 * @param {string} password - GitHub 密码
 	 * @param {string} noticeEmail - 通知邮箱 (可选，用于发送设备验证通知)
 	 * @param {string} twofaSecret - TOTP 两步验证密钥 Base32 编码 (可选，用于自动填写 2FA 验证码)
+	 * @param {Object} accountInfo - 账号信息（可选，用于令牌管理）
 	 * @returns {Object|null} - { session: string, apiUser: string, userInfo: object }
 	 */
-	async loginAndGetSession(accountId, username, password, noticeEmail = null, twofaSecret = null) {
+	async loginAndGetSession(accountId, username, password, noticeEmail = null, twofaSecret = null, accountInfo = null) {
 		console.log(`[登录签到] 开始处理 GitHub 账号: ${username}`);
 		console.log(`[账号ID] AnyRouter 账号ID: ${accountId}`);
 
@@ -563,6 +743,61 @@ class AnyRouterGitHubSignIn {
 				} else {
 					const msg = signInResponse.msg || signInResponse.message || '未知原因';
 					console.log(`[签到] 签到状态: ${msg}`);
+				}
+			}
+
+			// 步骤8: 令牌管理（需要 apiUser 和 userData）
+
+			if (apiUser && userData) {
+				// 根据账号配置管理令牌（删除和创建）
+				console.log(accountInfo.tokens,1231231231321)
+				if (accountInfo && accountInfo.tokens && Array.isArray(accountInfo.tokens)) {
+					console.log(
+						`[令牌管理] 发现账号配置中有 ${accountInfo.tokens.length} 个令牌配置，开始处理...`
+					);
+
+					for (const tokenConfig of accountInfo.tokens) {
+						// 如果有 id 且标记为删除，则删除该令牌
+						if (tokenConfig.id && tokenConfig.is_deleted) {
+							console.log(`[令牌管理] 准备删除令牌 ID: ${tokenConfig.id}`);
+							await this.deleteToken(page, String(apiUser), tokenConfig.id);
+						}
+						// 如果没有 id，表示是待创建的新令牌
+						else if (!tokenConfig.id) {
+							console.log('[令牌管理] 准备创建新令牌');
+							await this.createToken(page, String(apiUser), {
+								unlimited_quota: tokenConfig.unlimited_quota || false,
+								remain_quota: tokenConfig.remain_quota,
+								name: tokenConfig.name,
+							});
+						}
+					}
+
+					console.log('[令牌管理] 令牌管理完成');
+				}
+
+				// 获取令牌信息
+				let tokens = await this.getTokens(page, String(apiUser));
+
+				// 如果没有令牌，先创建一个
+				if (tokens.length === 0) {
+					const created = await this.createToken(page, String(apiUser), { unlimited_quota: true });
+					if (created) {
+						tokens = await this.getTokens(page, String(apiUser));
+					}
+				}
+
+				// 过滤令牌数据，只保留需要的字段
+				if (tokens.length > 0) {
+					userData.tokens = tokens.map((token) => ({
+						id: token.id,
+						key: token.key,
+						name: token.name,
+						unlimited_quota: token.unlimited_quota,
+						used_quota: token.used_quota,
+						remain_quota: token.remain_quota,
+					}));
+					console.log(`[信息] 成功获取 ${userData.tokens.length} 个令牌信息`);
 				}
 			}
 
